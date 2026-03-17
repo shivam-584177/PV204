@@ -1,0 +1,59 @@
+syntax = "proto3";
+
+package tsa.v1;
+option go_package = "pv204/gen/go/tsa/v1;tsav1";
+
+message Empty {}
+
+message Ack {
+  bool ok = 1;
+  string message = 2;
+}
+
+message NodeInfo {
+  string node_id = 1;
+  string host = 2;
+  uint32 port = 3;
+}
+
+message HealthStatus {
+  string status = 1; // "ok" / "starting" / "error"
+  string message = 2;
+}
+
+message SignJob {
+  string job_id = 1;
+  bytes msg_hash = 2; // 32 bytes (SHA-256)
+}
+
+message SignJobId {
+  string job_id = 1;
+}
+
+message TssPacket {
+  string job_id = 1;
+  string from_node = 2;
+  string to_node = 3; // empty = broadcast
+  bytes payload = 4;
+}
+
+message SignResult {
+  string job_id = 1;
+  string status = 2; // "pending" / "done" / "error"
+  string message = 3;
+  bytes signature = 4; // final ECDSA signature bytes (format TBD)
+  bytes pubkey = 5;    // public key bytes
+}
+
+service CoordinatorService {
+  rpc RegisterNode(NodeInfo) returns (Ack);
+  rpc Health(Empty) returns (HealthStatus);
+  rpc StartSigning(SignJob) returns (Ack);
+  rpc Relay(TssPacket) returns (Ack);
+  rpc GetResult(SignJobId) returns (SignResult);
+}
+
+service SignerService {
+  rpc Health(Empty) returns (HealthStatus);
+  rpc Relay(TssPacket) returns (Ack);
+}
