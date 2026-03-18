@@ -23,9 +23,6 @@ jobs:
       - name: Build signer node
         run: go build ./cmd/signer/...
 
-      - name: Build mockkeygen
-        run: go build ./cmd/mockkeygen/...
-
       - name: Run unit tests
         run: go test ./internal/...
 
