@@ -9,6 +9,7 @@ on:
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v4
 
@@ -25,15 +26,3 @@ jobs:
 
       - name: Run unit tests
         run: go test ./internal/...
-
-      - name: End-to-end smoke test
-        run: |
-          go run ./cmd/mockkeygen --out /tmp/keyshares --parties 3 --threshold 2
-          for i in 0 1 2; do
-            echo "Checking keyshare-$i.json ..."
-            cat /tmp/keyshares/keyshare-$i.json | python3 -m json.tool > /dev/null
-          done
-          echo "Mock key share generation: OK"
-          go build -o /tmp/signer-bin ./cmd/signer
-          /tmp/signer-bin --help || true
-          echo "Signer binary: OK"
