@@ -1,0 +1,42 @@
+name: Signer CI
+
+on:
+  push:
+    branches: ["main", "shivam/**"]
+  pull_request:
+    branches: ["main"]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Build signer node
+        run: go build ./cmd/signer/...
+
+      - name: Build mockkeygen
+        run: go build ./cmd/mockkeygen/...
+
+      - name: Run unit tests
+        run: go test ./internal/...
+
+      - name: End-to-end smoke test
+        run: |
+          go run ./cmd/mockkeygen --out /tmp/keyshares --parties 3 --threshold 2
+          for i in 0 1 2; do
+            echo "Checking keyshare-$i.json ..."
+            cat /tmp/keyshares/keyshare-$i.json | python3 -m json.tool > /dev/null
+          done
+          echo "Mock key share generation: OK"
+          go build -o /tmp/signer-bin ./cmd/signer
+          /tmp/signer-bin --help || true
+          echo "Signer binary: OK"
