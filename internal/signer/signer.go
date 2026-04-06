@@ -26,7 +26,7 @@ type Config struct {
 	Port         int
 	CoordAddr    string
 	KeySharePath string
-	MockSigning  bool
+	Threshold    int
 }
 
 func Run(cfg Config) error {
@@ -201,7 +201,7 @@ func (n *signerNode) startSigningJob(jobID string, msgHash []byte) (*signingJob,
 	}
 
 	thisPID := pids[idx]
-	threshold := signingThreshold(n.save)
+	threshold := n.cfg.Threshold
 
 	params := tss.NewParameters(
 		tss.S256(),
@@ -308,11 +308,4 @@ func localPartyIndex(save *keygen.LocalPartySaveData) int {
 		}
 	}
 	return 0
-}
-
-func signingThreshold(save *keygen.LocalPartySaveData) int {
-	if save == nil || len(save.Ks) == 0 {
-		return 0
-	}
-	return len(save.Ks) - 1
 }

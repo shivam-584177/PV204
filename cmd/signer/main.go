@@ -15,6 +15,7 @@ func main() {
 	port := flag.Int("port", 50051, "Port this signer listens on")
 	coordAddr := flag.String("coord", "localhost:50050", "Coordinator gRPC address")
 	keySharePath := flag.String("keyshare", "", "Path to key share JSON file")
+	threshold := flag.Int("threshold", 1, "threshold parameter t for (t+1)-of-n signing")
 	flag.Parse()
 
 	if *nodeID == "" {
@@ -34,6 +35,7 @@ func main() {
 		Port:         *port,
 		CoordAddr:    *coordAddr,
 		KeySharePath: *keySharePath,
+		Threshold:    *threshold,
 	}
 
 	log.Printf("[%s] Starting signer node on %s:%d", cfg.NodeID, cfg.Host, cfg.Port)
