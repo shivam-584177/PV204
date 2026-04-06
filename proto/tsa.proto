@@ -51,6 +51,7 @@ service CoordinatorService {
   rpc StartSigning(SignJob) returns (Ack);
   rpc Relay(TssPacket) returns (Ack);
   rpc GetResult(SignJobId) returns (SignResult);
+  rpc ReportResult(SignResult) returns (Ack);
 }
 
 service SignerService {
