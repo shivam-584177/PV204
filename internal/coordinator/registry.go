@@ -4,9 +4,10 @@ import (
 	"fmt"
 	"sync"
 
+	tsav1 "pv204/gen/go"
+
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
-	tsav1 "pv204/gen/go"
 )
 
 type signerConn struct {
@@ -54,6 +55,30 @@ func (r *Registry) All() []tsav1.SignerServiceClient {
 	out := make([]tsav1.SignerServiceClient, 0, len(r.nodes))
 	for _, c := range r.nodes {
 		out = append(out, c.client)
+	}
+	return out
+}
+
+func (r *Registry) Select(k int) []tsav1.SignerServiceClient {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	if k <= 0 || k >= len(r.nodes) {
+		out := make([]tsav1.SignerServiceClient, 0, len(r.nodes))
+		for _, c := range r.nodes {
+			out = append(out, c.client)
+		}
+		return out
+	}
+
+	out := make([]tsav1.SignerServiceClient, 0, k)
+	count := 0
+	for _, c := range r.nodes {
+		out = append(out, c.client)
+		count++
+		if count == k {
+			break
+		}
 	}
 	return out
 }

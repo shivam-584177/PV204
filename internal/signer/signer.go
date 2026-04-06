@@ -2,6 +2,8 @@ package signer
 
 import (
 	"context"
+	"crypto/elliptic"
+	"encoding/asn1"
 	"fmt"
 	"log"
 	"math/big"
@@ -26,7 +28,7 @@ type Config struct {
 	Port         int
 	CoordAddr    string
 	KeySharePath string
-	MockSigning  bool
+	Threshold    int
 }
 
 func Run(cfg Config) error {
@@ -114,6 +116,10 @@ type signingJob struct {
 	errCh chan *tss.Error
 }
 
+type ecdsaSignature struct {
+	R, S *big.Int
+}
+
 func (n *signerNode) Health(_ context.Context, _ *tsav1.Empty) (*tsav1.HealthStatus, error) {
 	return &tsav1.HealthStatus{
 		Status:  "ok",
@@ -130,14 +136,6 @@ func (n *signerNode) Relay(ctx context.Context, pkt *tsav1.TssPacket) (*tsav1.Ac
 	n.mu.Unlock()
 
 	if !exists && pkt.FromNode == "coordinator" && len(pkt.Payload) == 32 {
-		if n.cfg.MockSigning {
-			if err := n.mockInitSigningParty(pkt.JobId, pkt.Payload); err != nil {
-				return &tsav1.Ack{Ok: false, Message: "mock init failed: " + err.Error()}, nil
-			}
-			log.Printf("[%s] Mock signing: produced placeholder partial signature for job %s", n.cfg.NodeID, pkt.JobId)
-			return &tsav1.Ack{Ok: true, Message: "mock partial signature produced"}, nil
-		}
-
 		var err error
 		job, err = n.startSigningJob(pkt.JobId, pkt.Payload)
 		if err != nil {
@@ -167,30 +165,6 @@ func (n *signerNode) Relay(ctx context.Context, pkt *tsav1.TssPacket) (*tsav1.Ac
 	return &tsav1.Ack{Ok: true}, nil
 }
 
-func (n *signerNode) mockInitSigningParty(jobID string, msgHash []byte) error {
-	log.Printf("[%s] Mock signing init (Phase II)", n.cfg.NodeID)
-
-	// Phase II: keep this as a safe mock path.
-	// We verify that the keyshare was loaded and that a signing request reached the signer,
-	// but we do not run a real GG20 round here.
-
-	if n.save == nil {
-		return fmt.Errorf("keyshare not loaded")
-	}
-
-	if len(msgHash) == 0 {
-		return fmt.Errorf("empty message hash")
-	}
-
-	if len(n.save.Ks) == 0 {
-		log.Printf("[%s] WARNING: keyshare has no Ks entries; continuing with mock response", n.cfg.NodeID)
-	}
-
-	log.Printf("[%s] Mock TSS init successful for job %s", n.cfg.NodeID, jobID)
-
-	return nil
-}
-
 func (n *signerNode) startSigningJob(jobID string, msgHash []byte) (*signingJob, error) {
 	log.Printf("[%s] Starting GG20 signing round for job %s", n.cfg.NodeID, jobID)
 
@@ -201,7 +175,7 @@ func (n *signerNode) startSigningJob(jobID string, msgHash []byte) (*signingJob,
 	}
 
 	thisPID := pids[idx]
-	threshold := signingThreshold(n.save)
+	threshold := n.cfg.Threshold
 
 	params := tss.NewParameters(
 		tss.S256(),
@@ -246,6 +220,13 @@ func (n *signerNode) runSigningParty(jobID string, job *signingJob) {
 
 		case sig := <-job.endCh:
 			log.Printf("[%s] Job %s: signing complete! R=%x S=%x", n.cfg.NodeID, jobID, sig.R, sig.S)
+
+			if err := n.reportResult(jobID, sig); err != nil {
+				log.Printf("[%s] Job %s: report result failed: %v", n.cfg.NodeID, jobID, err)
+			} else {
+				log.Printf("[%s] Job %s: result reported to coordinator", n.cfg.NodeID, jobID)
+			}
+
 			n.mu.Lock()
 			delete(n.jobs, jobID)
 			n.mu.Unlock()
@@ -259,6 +240,67 @@ func (n *signerNode) runSigningParty(jobID string, job *signingJob) {
 			return
 		}
 	}
+}
+func encodeSignatureDER(sig *common.SignatureData) ([]byte, error) {
+	if sig == nil || sig.R == nil || sig.S == nil {
+		return nil, fmt.Errorf("missing signature values")
+	}
+
+	r := new(big.Int).SetBytes(sig.R)
+	s := new(big.Int).SetBytes(sig.S)
+
+	return asn1.Marshal(ecdsaSignature{
+		R: r,
+		S: s,
+	})
+}
+
+func encodeGroupPubKey(save *keygen.LocalPartySaveData) ([]byte, error) {
+	if save == nil || save.ECDSAPub == nil {
+		return nil, fmt.Errorf("missing group public key")
+	}
+
+	x := save.ECDSAPub.X()
+	y := save.ECDSAPub.Y()
+	if x == nil || y == nil {
+		return nil, fmt.Errorf("missing group public key coordinates")
+	}
+
+	pubBytes := elliptic.Marshal(tss.S256(), x, y)
+	if len(pubBytes) == 0 {
+		return nil, fmt.Errorf("failed to encode group public key")
+	}
+	return pubBytes, nil
+}
+
+func (n *signerNode) reportResult(jobID string, sig *common.SignatureData) error {
+	sigDER, err := encodeSignatureDER(sig)
+	if err != nil {
+		return fmt.Errorf("encode signature: %w", err)
+	}
+
+	pubKeyBytes, err := encodeGroupPubKey(n.save)
+	if err != nil {
+		return fmt.Errorf("encode pubkey: %w", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	ack, err := n.coordClient.ReportResult(ctx, &tsav1.SignResult{
+		JobId:     jobID,
+		Status:    "done",
+		Signature: sigDER,
+		Pubkey:    pubKeyBytes,
+	})
+	if err != nil {
+		return fmt.Errorf("report result rpc: %w", err)
+	}
+	if !ack.Ok {
+		return fmt.Errorf("coordinator rejected result: %s", ack.Message)
+	}
+
+	return nil
 }
 
 func (n *signerNode) forwardMessage(jobID string, msg tss.Message) {
@@ -308,11 +350,4 @@ func localPartyIndex(save *keygen.LocalPartySaveData) int {
 		}
 	}
 	return 0
-}
-
-func signingThreshold(save *keygen.LocalPartySaveData) int {
-	if save == nil || len(save.Ks) == 0 {
-		return 0
-	}
-	return len(save.Ks) - 1
 }
