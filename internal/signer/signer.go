@@ -2,6 +2,8 @@ package signer
 
 import (
 	"context"
+	"crypto/elliptic"
+	"encoding/asn1"
 	"fmt"
 	"log"
 	"math/big"
@@ -114,6 +116,10 @@ type signingJob struct {
 	errCh chan *tss.Error
 }
 
+type ecdsaSignature struct {
+	R, S *big.Int
+}
+
 func (n *signerNode) Health(_ context.Context, _ *tsav1.Empty) (*tsav1.HealthStatus, error) {
 	return &tsav1.HealthStatus{
 		Status:  "ok",
@@ -214,6 +220,13 @@ func (n *signerNode) runSigningParty(jobID string, job *signingJob) {
 
 		case sig := <-job.endCh:
 			log.Printf("[%s] Job %s: signing complete! R=%x S=%x", n.cfg.NodeID, jobID, sig.R, sig.S)
+
+			if err := n.reportResult(jobID, sig); err != nil {
+				log.Printf("[%s] Job %s: report result failed: %v", n.cfg.NodeID, jobID, err)
+			} else {
+				log.Printf("[%s] Job %s: result reported to coordinator", n.cfg.NodeID, jobID)
+			}
+
 			n.mu.Lock()
 			delete(n.jobs, jobID)
 			n.mu.Unlock()
@@ -227,6 +240,67 @@ func (n *signerNode) runSigningParty(jobID string, job *signingJob) {
 			return
 		}
 	}
+}
+func encodeSignatureDER(sig *common.SignatureData) ([]byte, error) {
+	if sig == nil || sig.R == nil || sig.S == nil {
+		return nil, fmt.Errorf("missing signature values")
+	}
+
+	r := new(big.Int).SetBytes(sig.R)
+	s := new(big.Int).SetBytes(sig.S)
+
+	return asn1.Marshal(ecdsaSignature{
+		R: r,
+		S: s,
+	})
+}
+
+func encodeGroupPubKey(save *keygen.LocalPartySaveData) ([]byte, error) {
+	if save == nil || save.ECDSAPub == nil {
+		return nil, fmt.Errorf("missing group public key")
+	}
+
+	x := save.ECDSAPub.X()
+	y := save.ECDSAPub.Y()
+	if x == nil || y == nil {
+		return nil, fmt.Errorf("missing group public key coordinates")
+	}
+
+	pubBytes := elliptic.Marshal(tss.S256(), x, y)
+	if len(pubBytes) == 0 {
+		return nil, fmt.Errorf("failed to encode group public key")
+	}
+	return pubBytes, nil
+}
+
+func (n *signerNode) reportResult(jobID string, sig *common.SignatureData) error {
+	sigDER, err := encodeSignatureDER(sig)
+	if err != nil {
+		return fmt.Errorf("encode signature: %w", err)
+	}
+
+	pubKeyBytes, err := encodeGroupPubKey(n.save)
+	if err != nil {
+		return fmt.Errorf("encode pubkey: %w", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	ack, err := n.coordClient.ReportResult(ctx, &tsav1.SignResult{
+		JobId:     jobID,
+		Status:    "done",
+		Signature: sigDER,
+		Pubkey:    pubKeyBytes,
+	})
+	if err != nil {
+		return fmt.Errorf("report result rpc: %w", err)
+	}
+	if !ack.Ok {
+		return fmt.Errorf("coordinator rejected result: %s", ack.Message)
+	}
+
+	return nil
 }
 
 func (n *signerNode) forwardMessage(jobID string, msg tss.Message) {
