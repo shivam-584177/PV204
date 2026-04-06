@@ -69,3 +69,23 @@ func (s *Server) Relay(ctx context.Context, pkt *tsav1.TssPacket) (*tsav1.Ack, e
 func (s *Server) GetResult(_ context.Context, req *tsav1.SignJobId) (*tsav1.SignResult, error) {
 	return s.sessions.ToResult(req.JobId), nil
 }
+
+func (s *Server) ReportResult(_ context.Context, req *tsav1.SignResult) (*tsav1.Ack, error) {
+	if req.GetJobId() == "" {
+		return &tsav1.Ack{Ok: false, Message: "missing job_id"}, nil
+	}
+	if len(req.GetSignature()) == 0 {
+		return &tsav1.Ack{Ok: false, Message: "missing signature"}, nil
+	}
+	if len(req.GetPubkey()) == 0 {
+		return &tsav1.Ack{Ok: false, Message: "missing pubkey"}, nil
+	}
+
+	ok := s.sessions.Complete(req.JobId, req.Signature, req.Pubkey)
+	if !ok {
+		return &tsav1.Ack{Ok: false, Message: "unknown job: " + req.JobId}, nil
+	}
+
+	log.Printf("completed signing job %s", req.JobId)
+	return &tsav1.Ack{Ok: true}, nil
+}
