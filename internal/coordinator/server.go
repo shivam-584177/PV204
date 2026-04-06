@@ -9,14 +9,16 @@ import (
 
 type Server struct {
 	tsav1.UnimplementedCoordinatorServiceServer
-	registry *Registry
-	sessions *SessionStore
+	registry  *Registry
+	sessions  *SessionStore
+	Threshold int
 }
 
-func NewServer() *Server {
+func NewServer(threshold int) *Server {
 	return &Server{
-		registry: NewRegistry(),
-		sessions: NewSessionStore(),
+		registry:  NewRegistry(),
+		sessions:  NewSessionStore(),
+		Threshold: threshold,
 	}
 }
 
@@ -40,7 +42,7 @@ func (s *Server) StartSigning(ctx context.Context, job *tsav1.SignJob) (*tsav1.A
 		FromNode: "coordinator",
 		Payload:  job.MsgHash,
 	}
-	for _, c := range s.registry.All() {
+	for _, c := range s.registry.Select(s.Threshold + 1) {
 		if _, err := c.Relay(ctx, pkt); err != nil {
 			log.Printf("relay to signer failed: %v", err)
 		}
