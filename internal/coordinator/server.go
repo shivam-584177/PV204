@@ -12,13 +12,15 @@ type Server struct {
 	registry  *Registry
 	sessions  *SessionStore
 	Threshold int
+	secret    string
 }
 
-func NewServer(threshold int) *Server {
+func NewServer(threshold int, secret string) *Server {
 	return &Server{
 		registry:  NewRegistry(),
 		sessions:  NewSessionStore(),
 		Threshold: threshold,
+		secret:    secret,
 	}
 }
 
@@ -27,6 +29,10 @@ func (s *Server) Health(_ context.Context, _ *tsav1.Empty) (*tsav1.HealthStatus,
 }
 
 func (s *Server) RegisterNode(_ context.Context, info *tsav1.NodeInfo) (*tsav1.Ack, error) {
+	if s.secret != "" && info.Token != s.secret {
+		log.Printf("rejected unauthorized registration attempt from node: %s", info.NodeId)
+		return &tsav1.Ack{Ok: false, Message: "unauthorized"}, nil
+	}
 	if err := s.registry.Register(info); err != nil {
 		return &tsav1.Ack{Ok: false, Message: err.Error()}, nil
 	}
@@ -35,25 +41,32 @@ func (s *Server) RegisterNode(_ context.Context, info *tsav1.NodeInfo) (*tsav1.A
 }
 
 func (s *Server) StartSigning(ctx context.Context, job *tsav1.SignJob) (*tsav1.Ack, error) {
+	// Reject duplicate job IDs — prevents replay attacks and silent session overwrites.
+	if _, exists := s.sessions.Get(job.JobId); exists {
+		return &tsav1.Ack{Ok: false, Message: "duplicate job_id"}, nil
+	}
+
 	s.sessions.Create(job.JobId, job.MsgHash)
-	// Phase II stub: fan out the msg_hash as payload to all signers
 	pkt := &tsav1.TssPacket{
 		JobId:    job.JobId,
 		FromNode: "coordinator",
 		Payload:  job.MsgHash,
 	}
-	for _, c := range s.registry.Select(s.Threshold + 1) {
+	// Contact ALL registered signers. GG20 requires all n parties to participate
+	// in every round. The threshold t is enforced cryptographically: at least t+1
+	// parties must cooperate to produce a valid signature. Contacting only a subset
+	// would cause the others to wait for missing messages and deadlock.
+	for _, c := range s.registry.All() {
 		if _, err := c.Relay(ctx, pkt); err != nil {
 			log.Printf("relay to signer failed: %v", err)
 		}
 	}
-	log.Printf("started signing job %s", job.JobId)
+	log.Printf("started signing job %s (threshold=%d)", job.JobId, s.Threshold)
 	return &tsav1.Ack{Ok: true}, nil
 }
 
 func (s *Server) Relay(ctx context.Context, pkt *tsav1.TssPacket) (*tsav1.Ack, error) {
 	if pkt.ToNode == "" {
-		// Broadcast to all signers
 		for _, c := range s.registry.All() {
 			if _, err := c.Relay(ctx, pkt); err != nil {
 				log.Printf("broadcast relay failed: %v", err)

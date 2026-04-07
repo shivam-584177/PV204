@@ -2,7 +2,7 @@
 // versions:
 // 	protoc-gen-go v1.36.11
 // 	protoc        v7.34.1
-// source: tsa.proto
+// source: proto/tsa.proto
 
 package tsav1
 
@@ -29,7 +29,7 @@ type Empty struct {
 
 func (x *Empty) Reset() {
 	*x = Empty{}
-	mi := &file_tsa_proto_msgTypes[0]
+	mi := &file_proto_tsa_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -41,7 +41,7 @@ func (x *Empty) String() string {
 func (*Empty) ProtoMessage() {}
 
 func (x *Empty) ProtoReflect() protoreflect.Message {
-	mi := &file_tsa_proto_msgTypes[0]
+	mi := &file_proto_tsa_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -54,7 +54,7 @@ func (x *Empty) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Empty.ProtoReflect.Descriptor instead.
 func (*Empty) Descriptor() ([]byte, []int) {
-	return file_tsa_proto_rawDescGZIP(), []int{0}
+	return file_proto_tsa_proto_rawDescGZIP(), []int{0}
 }
 
 type Ack struct {
@@ -67,7 +67,7 @@ type Ack struct {
 
 func (x *Ack) Reset() {
 	*x = Ack{}
-	mi := &file_tsa_proto_msgTypes[1]
+	mi := &file_proto_tsa_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -79,7 +79,7 @@ func (x *Ack) String() string {
 func (*Ack) ProtoMessage() {}
 
 func (x *Ack) ProtoReflect() protoreflect.Message {
-	mi := &file_tsa_proto_msgTypes[1]
+	mi := &file_proto_tsa_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -92,7 +92,7 @@ func (x *Ack) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Ack.ProtoReflect.Descriptor instead.
 func (*Ack) Descriptor() ([]byte, []int) {
-	return file_tsa_proto_rawDescGZIP(), []int{1}
+	return file_proto_tsa_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *Ack) GetOk() bool {
@@ -114,13 +114,14 @@ type NodeInfo struct {
 	NodeId        string                 `protobuf:"bytes,1,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
 	Host          string                 `protobuf:"bytes,2,opt,name=host,proto3" json:"host,omitempty"`
 	Port          uint32                 `protobuf:"varint,3,opt,name=port,proto3" json:"port,omitempty"`
+	Token         string                 `protobuf:"bytes,4,opt,name=token,proto3" json:"token,omitempty"` // shared secret for registration authentication
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *NodeInfo) Reset() {
 	*x = NodeInfo{}
-	mi := &file_tsa_proto_msgTypes[2]
+	mi := &file_proto_tsa_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -132,7 +133,7 @@ func (x *NodeInfo) String() string {
 func (*NodeInfo) ProtoMessage() {}
 
 func (x *NodeInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_tsa_proto_msgTypes[2]
+	mi := &file_proto_tsa_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -145,7 +146,7 @@ func (x *NodeInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NodeInfo.ProtoReflect.Descriptor instead.
 func (*NodeInfo) Descriptor() ([]byte, []int) {
-	return file_tsa_proto_rawDescGZIP(), []int{2}
+	return file_proto_tsa_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *NodeInfo) GetNodeId() string {
@@ -169,6 +170,13 @@ func (x *NodeInfo) GetPort() uint32 {
 	return 0
 }
 
+func (x *NodeInfo) GetToken() string {
+	if x != nil {
+		return x.Token
+	}
+	return ""
+}
+
 type HealthStatus struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Status        string                 `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"` // "ok" / "starting" / "error"
@@ -179,7 +187,7 @@ type HealthStatus struct {
 
 func (x *HealthStatus) Reset() {
 	*x = HealthStatus{}
-	mi := &file_tsa_proto_msgTypes[3]
+	mi := &file_proto_tsa_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -191,7 +199,7 @@ func (x *HealthStatus) String() string {
 func (*HealthStatus) ProtoMessage() {}
 
 func (x *HealthStatus) ProtoReflect() protoreflect.Message {
-	mi := &file_tsa_proto_msgTypes[3]
+	mi := &file_proto_tsa_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -204,7 +212,7 @@ func (x *HealthStatus) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HealthStatus.ProtoReflect.Descriptor instead.
 func (*HealthStatus) Descriptor() ([]byte, []int) {
-	return file_tsa_proto_rawDescGZIP(), []int{3}
+	return file_proto_tsa_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *HealthStatus) GetStatus() string {
@@ -231,7 +239,7 @@ type SignJob struct {
 
 func (x *SignJob) Reset() {
 	*x = SignJob{}
-	mi := &file_tsa_proto_msgTypes[4]
+	mi := &file_proto_tsa_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -243,7 +251,7 @@ func (x *SignJob) String() string {
 func (*SignJob) ProtoMessage() {}
 
 func (x *SignJob) ProtoReflect() protoreflect.Message {
-	mi := &file_tsa_proto_msgTypes[4]
+	mi := &file_proto_tsa_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -256,7 +264,7 @@ func (x *SignJob) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SignJob.ProtoReflect.Descriptor instead.
 func (*SignJob) Descriptor() ([]byte, []int) {
-	return file_tsa_proto_rawDescGZIP(), []int{4}
+	return file_proto_tsa_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *SignJob) GetJobId() string {
@@ -282,7 +290,7 @@ type SignJobId struct {
 
 func (x *SignJobId) Reset() {
 	*x = SignJobId{}
-	mi := &file_tsa_proto_msgTypes[5]
+	mi := &file_proto_tsa_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -294,7 +302,7 @@ func (x *SignJobId) String() string {
 func (*SignJobId) ProtoMessage() {}
 
 func (x *SignJobId) ProtoReflect() protoreflect.Message {
-	mi := &file_tsa_proto_msgTypes[5]
+	mi := &file_proto_tsa_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -307,7 +315,7 @@ func (x *SignJobId) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SignJobId.ProtoReflect.Descriptor instead.
 func (*SignJobId) Descriptor() ([]byte, []int) {
-	return file_tsa_proto_rawDescGZIP(), []int{5}
+	return file_proto_tsa_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *SignJobId) GetJobId() string {
@@ -329,7 +337,7 @@ type TssPacket struct {
 
 func (x *TssPacket) Reset() {
 	*x = TssPacket{}
-	mi := &file_tsa_proto_msgTypes[6]
+	mi := &file_proto_tsa_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -341,7 +349,7 @@ func (x *TssPacket) String() string {
 func (*TssPacket) ProtoMessage() {}
 
 func (x *TssPacket) ProtoReflect() protoreflect.Message {
-	mi := &file_tsa_proto_msgTypes[6]
+	mi := &file_proto_tsa_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -354,7 +362,7 @@ func (x *TssPacket) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TssPacket.ProtoReflect.Descriptor instead.
 func (*TssPacket) Descriptor() ([]byte, []int) {
-	return file_tsa_proto_rawDescGZIP(), []int{6}
+	return file_proto_tsa_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *TssPacket) GetJobId() string {
@@ -390,15 +398,15 @@ type SignResult struct {
 	JobId         string                 `protobuf:"bytes,1,opt,name=job_id,json=jobId,proto3" json:"job_id,omitempty"`
 	Status        string                 `protobuf:"bytes,2,opt,name=status,proto3" json:"status,omitempty"` // "pending" / "done" / "error"
 	Message       string                 `protobuf:"bytes,3,opt,name=message,proto3" json:"message,omitempty"`
-	Signature     []byte                 `protobuf:"bytes,4,opt,name=signature,proto3" json:"signature,omitempty"` // final ECDSA signature bytes (format TBD)
-	Pubkey        []byte                 `protobuf:"bytes,5,opt,name=pubkey,proto3" json:"pubkey,omitempty"`       // public key bytes
+	Signature     []byte                 `protobuf:"bytes,4,opt,name=signature,proto3" json:"signature,omitempty"` // DER-encoded ECDSA signature
+	Pubkey        []byte                 `protobuf:"bytes,5,opt,name=pubkey,proto3" json:"pubkey,omitempty"`       // uncompressed secp256k1 public key (04 || X || Y)
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *SignResult) Reset() {
 	*x = SignResult{}
-	mi := &file_tsa_proto_msgTypes[7]
+	mi := &file_proto_tsa_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -410,7 +418,7 @@ func (x *SignResult) String() string {
 func (*SignResult) ProtoMessage() {}
 
 func (x *SignResult) ProtoReflect() protoreflect.Message {
-	mi := &file_tsa_proto_msgTypes[7]
+	mi := &file_proto_tsa_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -423,7 +431,7 @@ func (x *SignResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SignResult.ProtoReflect.Descriptor instead.
 func (*SignResult) Descriptor() ([]byte, []int) {
-	return file_tsa_proto_rawDescGZIP(), []int{7}
+	return file_proto_tsa_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *SignResult) GetJobId() string {
@@ -461,19 +469,20 @@ func (x *SignResult) GetPubkey() []byte {
 	return nil
 }
 
-var File_tsa_proto protoreflect.FileDescriptor
+var File_proto_tsa_proto protoreflect.FileDescriptor
 
-const file_tsa_proto_rawDesc = "" +
+const file_proto_tsa_proto_rawDesc = "" +
 	"\n" +
-	"\ttsa.proto\x12\x06tsa.v1\"\a\n" +
+	"\x0fproto/tsa.proto\x12\x06tsa.v1\"\a\n" +
 	"\x05Empty\"/\n" +
 	"\x03Ack\x12\x0e\n" +
 	"\x02ok\x18\x01 \x01(\bR\x02ok\x12\x18\n" +
-	"\amessage\x18\x02 \x01(\tR\amessage\"K\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\"a\n" +
 	"\bNodeInfo\x12\x17\n" +
 	"\anode_id\x18\x01 \x01(\tR\x06nodeId\x12\x12\n" +
 	"\x04host\x18\x02 \x01(\tR\x04host\x12\x12\n" +
-	"\x04port\x18\x03 \x01(\rR\x04port\"@\n" +
+	"\x04port\x18\x03 \x01(\rR\x04port\x12\x14\n" +
+	"\x05token\x18\x04 \x01(\tR\x05token\"@\n" +
 	"\fHealthStatus\x12\x16\n" +
 	"\x06status\x18\x01 \x01(\tR\x06status\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\";\n" +
@@ -506,19 +515,19 @@ const file_tsa_proto_rawDesc = "" +
 	"\x05Relay\x12\x11.tsa.v1.TssPacket\x1a\v.tsa.v1.AckB\x1bZ\x19pv204/gen/go/tsa/v1;tsav1b\x06proto3"
 
 var (
-	file_tsa_proto_rawDescOnce sync.Once
-	file_tsa_proto_rawDescData []byte
+	file_proto_tsa_proto_rawDescOnce sync.Once
+	file_proto_tsa_proto_rawDescData []byte
 )
 
-func file_tsa_proto_rawDescGZIP() []byte {
-	file_tsa_proto_rawDescOnce.Do(func() {
-		file_tsa_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_tsa_proto_rawDesc), len(file_tsa_proto_rawDesc)))
+func file_proto_tsa_proto_rawDescGZIP() []byte {
+	file_proto_tsa_proto_rawDescOnce.Do(func() {
+		file_proto_tsa_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_proto_tsa_proto_rawDesc), len(file_proto_tsa_proto_rawDesc)))
 	})
-	return file_tsa_proto_rawDescData
+	return file_proto_tsa_proto_rawDescData
 }
 
-var file_tsa_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
-var file_tsa_proto_goTypes = []any{
+var file_proto_tsa_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
+var file_proto_tsa_proto_goTypes = []any{
 	(*Empty)(nil),        // 0: tsa.v1.Empty
 	(*Ack)(nil),          // 1: tsa.v1.Ack
 	(*NodeInfo)(nil),     // 2: tsa.v1.NodeInfo
@@ -528,7 +537,7 @@ var file_tsa_proto_goTypes = []any{
 	(*TssPacket)(nil),    // 6: tsa.v1.TssPacket
 	(*SignResult)(nil),   // 7: tsa.v1.SignResult
 }
-var file_tsa_proto_depIdxs = []int32{
+var file_proto_tsa_proto_depIdxs = []int32{
 	2, // 0: tsa.v1.CoordinatorService.RegisterNode:input_type -> tsa.v1.NodeInfo
 	0, // 1: tsa.v1.CoordinatorService.Health:input_type -> tsa.v1.Empty
 	4, // 2: tsa.v1.CoordinatorService.StartSigning:input_type -> tsa.v1.SignJob
@@ -552,26 +561,26 @@ var file_tsa_proto_depIdxs = []int32{
 	0, // [0:0] is the sub-list for field type_name
 }
 
-func init() { file_tsa_proto_init() }
-func file_tsa_proto_init() {
-	if File_tsa_proto != nil {
+func init() { file_proto_tsa_proto_init() }
+func file_proto_tsa_proto_init() {
+	if File_proto_tsa_proto != nil {
 		return
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			RawDescriptor: unsafe.Slice(unsafe.StringData(file_tsa_proto_rawDesc), len(file_tsa_proto_rawDesc)),
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_proto_tsa_proto_rawDesc), len(file_proto_tsa_proto_rawDesc)),
 			NumEnums:      0,
 			NumMessages:   8,
 			NumExtensions: 0,
 			NumServices:   2,
 		},
-		GoTypes:           file_tsa_proto_goTypes,
-		DependencyIndexes: file_tsa_proto_depIdxs,
-		MessageInfos:      file_tsa_proto_msgTypes,
+		GoTypes:           file_proto_tsa_proto_goTypes,
+		DependencyIndexes: file_proto_tsa_proto_depIdxs,
+		MessageInfos:      file_proto_tsa_proto_msgTypes,
 	}.Build()
-	File_tsa_proto = out.File
-	file_tsa_proto_goTypes = nil
-	file_tsa_proto_depIdxs = nil
+	File_proto_tsa_proto = out.File
+	file_proto_tsa_proto_goTypes = nil
+	file_proto_tsa_proto_depIdxs = nil
 }
