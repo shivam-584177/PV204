@@ -2,7 +2,7 @@
 // versions:
 // - protoc-gen-go-grpc v1.6.1
 // - protoc             v7.34.1
-// source: tsa.proto
+// source: proto/tsa.proto
 
 package tsav1
 
@@ -307,7 +307,7 @@ var CoordinatorService_ServiceDesc = grpc.ServiceDesc{
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
-	Metadata: "tsa.proto",
+	Metadata: "proto/tsa.proto",
 }
 
 const (
@@ -447,5 +447,5 @@ var SignerService_ServiceDesc = grpc.ServiceDesc{
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
-	Metadata: "tsa.proto",
+	Metadata: "proto/tsa.proto",
 }

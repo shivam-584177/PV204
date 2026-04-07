@@ -29,6 +29,7 @@ type Config struct {
 	CoordAddr    string
 	KeySharePath string
 	Threshold    int
+	Secret       string // shared secret for coordinator authentication
 }
 
 func Run(cfg Config) error {
@@ -74,6 +75,7 @@ func registerWithRetry(cfg Config, client tsav1.CoordinatorServiceClient) error 
 		NodeId: cfg.NodeID,
 		Host:   cfg.Host,
 		Port:   uint32(cfg.Port),
+		Token:  cfg.Secret, // present shared secret on registration
 	}
 
 	var lastErr error
@@ -241,6 +243,7 @@ func (n *signerNode) runSigningParty(jobID string, job *signingJob) {
 		}
 	}
 }
+
 func encodeSignatureDER(sig *common.SignatureData) ([]byte, error) {
 	if sig == nil || sig.R == nil || sig.S == nil {
 		return nil, fmt.Errorf("missing signature values")
@@ -249,10 +252,7 @@ func encodeSignatureDER(sig *common.SignatureData) ([]byte, error) {
 	r := new(big.Int).SetBytes(sig.R)
 	s := new(big.Int).SetBytes(sig.S)
 
-	return asn1.Marshal(ecdsaSignature{
-		R: r,
-		S: s,
-	})
+	return asn1.Marshal(ecdsaSignature{R: r, S: s})
 }
 
 func encodeGroupPubKey(save *keygen.LocalPartySaveData) ([]byte, error) {

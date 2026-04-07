@@ -12,18 +12,19 @@ message Ack {
 
 message NodeInfo {
   string node_id = 1;
-  string host = 2;
-  uint32 port = 3;
+  string host    = 2;
+  uint32 port    = 3;
+  string token   = 4; // shared secret for registration authentication
 }
 
 message HealthStatus {
-  string status = 1; // "ok" / "starting" / "error"
+  string status  = 1; // "ok" / "starting" / "error"
   string message = 2;
 }
 
 message SignJob {
-  string job_id = 1;
-  bytes msg_hash = 2; // 32 bytes (SHA-256)
+  string job_id   = 1;
+  bytes  msg_hash = 2; // 32 bytes (SHA-256)
 }
 
 message SignJobId {
@@ -31,30 +32,30 @@ message SignJobId {
 }
 
 message TssPacket {
-  string job_id = 1;
+  string job_id    = 1;
   string from_node = 2;
-  string to_node = 3; // empty = broadcast
-  bytes payload = 4;
+  string to_node   = 3; // empty = broadcast
+  bytes  payload   = 4;
 }
 
 message SignResult {
-  string job_id = 1;
-  string status = 2; // "pending" / "done" / "error"
-  string message = 3;
-  bytes signature = 4; // final ECDSA signature bytes (format TBD)
-  bytes pubkey = 5;    // public key bytes
+  string job_id    = 1;
+  string status    = 2; // "pending" / "done" / "error"
+  string message   = 3;
+  bytes  signature = 4; // DER-encoded ECDSA signature
+  bytes  pubkey    = 5; // uncompressed secp256k1 public key (04 || X || Y)
 }
 
 service CoordinatorService {
-  rpc RegisterNode(NodeInfo) returns (Ack);
-  rpc Health(Empty) returns (HealthStatus);
-  rpc StartSigning(SignJob) returns (Ack);
-  rpc Relay(TssPacket) returns (Ack);
-  rpc GetResult(SignJobId) returns (SignResult);
+  rpc RegisterNode(NodeInfo)   returns (Ack);
+  rpc Health(Empty)            returns (HealthStatus);
+  rpc StartSigning(SignJob)    returns (Ack);
+  rpc Relay(TssPacket)         returns (Ack);
+  rpc GetResult(SignJobId)     returns (SignResult);
   rpc ReportResult(SignResult) returns (Ack);
 }
 
 service SignerService {
-  rpc Health(Empty) returns (HealthStatus);
+  rpc Health(Empty)    returns (HealthStatus);
   rpc Relay(TssPacket) returns (Ack);
 }
