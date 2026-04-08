@@ -6,43 +6,64 @@
 
 set -euo pipefail
 
+COORD_PORT=18050
+SIGNER_BASE_PORT=18050
+
+echo "[e2e] Cleaning previous processes..."
+
+# Kill coordinator
+lsof -ti :$COORD_PORT | xargs kill -9 2>/dev/null || true
+
+# Kill signers
+for i in 1 2 3; do
+    PORT=$((SIGNER_BASE_PORT + i))
+    lsof -ti :$PORT | xargs kill -9 2>/dev/null || true
+done
+
+sleep 1
+
 TMPDIR=$(mktemp -d)
 PIDS=()
 
 cleanup() {
     echo "[e2e] Cleaning up..."
     for pid in "${PIDS[@]}"; do
-        kill "$pid" 2>/dev/null || true
+        kill -9 "$pid" 2>/dev/null || true
     done
-    rm -rf "$TMPDIR"
+    pkill -f cmd/signer 2>/dev/null || true
+    pkill -f cmd/coordinator 2>/dev/null || true
 }
 trap cleanup EXIT
 
 SECRET="pv204-e2e-secret"
-COORD="localhost:50050"
+COORD="localhost:18050"
 
 echo "[e2e] Step 1: Generating keyshares..."
 go run ./cmd/keygen \
     --parties=3 \
-    --threshold=1 \
+    --threshold=2 \
     --out-dir="$TMPDIR/keyshares"
 
 echo "[e2e] Step 2: Starting coordinator..."
 go run ./cmd/coordinator \
-    --port=50050 \
-    --threshold=1 \
+    --port=18050 \
+    --threshold=2 \
     --secret="$SECRET" &
 PIDS+=($!)
-sleep 1
+
+# Wait until coordinator is actually listening
+until lsof -i :$COORD_PORT >/dev/null 2>&1; do
+    sleep 0.5
+done
 
 echo "[e2e] Step 3: Starting 3 signer nodes..."
 for i in 1 2 3; do
     go run ./cmd/signer \
         --id="signer-$i" \
-        --port="5005$i" \
+        --port="1805$i" \
         --coord="$COORD" \
         --keyshare="$TMPDIR/keyshares/signer${i}.json" \
-        --threshold=1 \
+        --threshold=2 \
         --secret="$SECRET" &
     PIDS+=($!)
 done

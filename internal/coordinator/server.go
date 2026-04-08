@@ -67,8 +67,11 @@ func (s *Server) StartSigning(ctx context.Context, job *tsav1.SignJob) (*tsav1.A
 
 func (s *Server) Relay(ctx context.Context, pkt *tsav1.TssPacket) (*tsav1.Ack, error) {
 	if pkt.ToNode == "" {
-		for _, c := range s.registry.All() {
-			if _, err := c.Relay(ctx, pkt); err != nil {
+		for nodeID, c := range s.registry.nodes {
+			if nodeID == pkt.FromNode {
+				continue
+			}
+			if _, err := c.client.Relay(ctx, pkt); err != nil {
 				log.Printf("broadcast relay failed: %v", err)
 			}
 		}

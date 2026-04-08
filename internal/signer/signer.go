@@ -39,18 +39,6 @@ func Run(cfg Config) error {
 	}
 	log.Printf("[%s] Key share loaded (participants=%d)", cfg.NodeID, len(save.Ks))
 
-	coordConn, err := grpc.Dial(cfg.CoordAddr,
-		grpc.WithTransportCredentials(insecure.NewCredentials()))
-	if err != nil {
-		return fmt.Errorf("dial coordinator %s: %w", cfg.CoordAddr, err)
-	}
-	defer coordConn.Close()
-	coordClient := tsav1.NewCoordinatorServiceClient(coordConn)
-
-	if err := registerWithRetry(cfg, coordClient); err != nil {
-		return fmt.Errorf("register with coordinator: %w", err)
-	}
-
 	addr := fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)
 	lis, err := net.Listen("tcp", addr)
 	if err != nil {
@@ -58,16 +46,35 @@ func Run(cfg Config) error {
 	}
 
 	srv := grpc.NewServer()
+
 	node := &signerNode{
-		cfg:         cfg,
-		save:        save,
-		coordClient: coordClient,
-		jobs:        make(map[string]*signingJob),
+		cfg:  cfg,
+		save: save,
+		jobs: make(map[string]*signingJob),
 	}
+
 	tsav1.RegisterSignerServiceServer(srv, node)
 
-	log.Printf("[%s] SignerService listening on %s", cfg.NodeID, addr)
-	return srv.Serve(lis)
+	go func() {
+		log.Printf("[%s] SignerService listening on %s", cfg.NodeID, addr)
+		if err := srv.Serve(lis); err != nil {
+			log.Fatalf("[%s] serve error: %v", cfg.NodeID, err)
+		}
+	}()
+
+	// Dial coordinator AFTER server is up
+	coordConn, err := grpc.Dial(cfg.CoordAddr,
+		grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		return fmt.Errorf("dial coordinator %s: %w", cfg.CoordAddr, err)
+	}
+	node.coordClient = tsav1.NewCoordinatorServiceClient(coordConn)
+
+	if err := registerWithRetry(cfg, node.coordClient); err != nil {
+		return fmt.Errorf("register with coordinator: %w", err)
+	}
+
+	select {} // block forever
 }
 
 func registerWithRetry(cfg Config, client tsav1.CoordinatorServiceClient) error {
@@ -128,7 +135,6 @@ func (n *signerNode) Health(_ context.Context, _ *tsav1.Empty) (*tsav1.HealthSta
 		Message: "signer ready",
 	}, nil
 }
-
 func (n *signerNode) Relay(ctx context.Context, pkt *tsav1.TssPacket) (*tsav1.Ack, error) {
 	log.Printf("[%s] Relay: job=%s from=%s to=%s payload_len=%d",
 		n.cfg.NodeID, pkt.JobId, pkt.FromNode, pkt.ToNode, len(pkt.Payload))
@@ -137,6 +143,7 @@ func (n *signerNode) Relay(ctx context.Context, pkt *tsav1.TssPacket) (*tsav1.Ac
 	job, exists := n.jobs[pkt.JobId]
 	n.mu.Unlock()
 
+	// Start job if coordinator triggers it
 	if !exists && pkt.FromNode == "coordinator" && len(pkt.Payload) == 32 {
 		var err error
 		job, err = n.startSigningJob(pkt.JobId, pkt.Payload)
@@ -150,7 +157,25 @@ func (n *signerNode) Relay(ctx context.Context, pkt *tsav1.TssPacket) (*tsav1.Ac
 		return &tsav1.Ack{Ok: false, Message: "unknown job " + pkt.JobId}, nil
 	}
 
-	msg, err := tss.ParseWireMessage(pkt.Payload, nil, pkt.FromNode == "")
+	// Build correct PartyID for sender
+	pids := buildPartyIDs(n.save)
+
+	var fromPID *tss.PartyID
+	for _, pid := range pids {
+		if pid.Id == pkt.FromNode {
+			fromPID = pid
+			break
+		}
+	}
+
+	if fromPID == nil {
+		return &tsav1.Ack{Ok: false, Message: "unknown sender " + pkt.FromNode}, nil
+	}
+
+	// Correct broadcast detection
+	isBroadcast := pkt.ToNode == ""
+
+	msg, err := tss.ParseWireMessage(pkt.Payload, fromPID, isBroadcast)
 	if err != nil {
 		return &tsav1.Ack{Ok: false, Message: "parse wire message: " + err.Error()}, nil
 	}
@@ -218,7 +243,7 @@ func (n *signerNode) runSigningParty(jobID string, job *signingJob) {
 	for {
 		select {
 		case msg := <-job.outCh:
-			n.forwardMessage(jobID, msg)
+			n.forwardMessage(jobID, job, msg)
 
 		case sig := <-job.endCh:
 			log.Printf("[%s] Job %s: signing complete! R=%x S=%x", n.cfg.NodeID, jobID, sig.R, sig.S)
@@ -303,7 +328,7 @@ func (n *signerNode) reportResult(jobID string, sig *common.SignatureData) error
 	return nil
 }
 
-func (n *signerNode) forwardMessage(jobID string, msg tss.Message) {
+func (n *signerNode) forwardMessage(jobID string, job *signingJob, msg tss.Message) {
 	wireBytes, routing, err := msg.WireBytes()
 	if err != nil {
 		log.Printf("[%s] WireBytes error: %v", n.cfg.NodeID, err)
@@ -313,6 +338,33 @@ func (n *signerNode) forwardMessage(jobID string, msg tss.Message) {
 	toNode := ""
 	if !routing.IsBroadcast && len(routing.To) == 1 {
 		toNode = routing.To[0].Id
+	}
+	if toNode == n.cfg.NodeID {
+		pids := buildPartyIDs(n.save)
+
+		var fromPID *tss.PartyID
+		for _, pid := range pids {
+			if pid.Id == n.cfg.NodeID {
+				fromPID = pid
+				break
+			}
+		}
+		if fromPID == nil {
+			log.Printf("[%s] local relay failed: unknown self party id", n.cfg.NodeID)
+			return
+		}
+
+		msgParsed, err := tss.ParseWireMessage(wireBytes, fromPID, false)
+		if err != nil {
+			log.Printf("[%s] local relay parse failed: %v", n.cfg.NodeID, err)
+			return
+		}
+
+		ok, tssErr := job.party.Update(msgParsed)
+		if !ok || tssErr != nil {
+			log.Printf("[%s] local relay update failed: %v", n.cfg.NodeID, tssErr)
+		}
+		return
 	}
 
 	pkt := &tsav1.TssPacket{
