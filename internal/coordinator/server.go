@@ -67,7 +67,9 @@ func (s *Server) StartSigning(ctx context.Context, job *tsav1.SignJob) (*tsav1.A
 
 func (s *Server) Relay(ctx context.Context, pkt *tsav1.TssPacket) (*tsav1.Ack, error) {
 	if pkt.ToNode == "" {
-		for _, c := range s.registry.All() {
+		// Broadcast: forward to all signers except the sender to avoid echo.
+		// Uses AllExcept which is properly mutex-protected.
+		for _, c := range s.registry.AllExcept(pkt.FromNode) {
 			if _, err := c.Relay(ctx, pkt); err != nil {
 				log.Printf("broadcast relay failed: %v", err)
 			}

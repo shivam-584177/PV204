@@ -49,3 +49,26 @@ func TestSelectZeroReturnsAll(t *testing.T) {
 		t.Fatalf("expected Select(0) to return all 2 nodes, got %d", len(got))
 	}
 }
+
+func TestAllExceptExcludesSender(t *testing.T) {
+	r := NewRegistry()
+	r.nodes["signer-1"] = &signerConn{}
+	r.nodes["signer-2"] = &signerConn{}
+	r.nodes["signer-3"] = &signerConn{}
+
+	got := r.AllExcept("signer-1")
+	if len(got) != 2 {
+		t.Fatalf("expected AllExcept to return 2 nodes, got %d", len(got))
+	}
+}
+
+func TestAllExceptUnknownIDReturnsAll(t *testing.T) {
+	r := NewRegistry()
+	r.nodes["signer-1"] = &signerConn{}
+	r.nodes["signer-2"] = &signerConn{}
+
+	got := r.AllExcept("nonexistent")
+	if len(got) != 2 {
+		t.Fatalf("expected AllExcept with unknown ID to return all 2, got %d", len(got))
+	}
+}
