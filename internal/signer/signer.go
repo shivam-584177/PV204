@@ -4,10 +4,13 @@ import (
 	"context"
 	"crypto/elliptic"
 	"encoding/asn1"
+	"encoding/json"
 	"fmt"
 	"log"
 	"math/big"
 	"net"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -29,7 +32,7 @@ type Config struct {
 	CoordAddr    string
 	KeySharePath string
 	Threshold    int
-	Secret       string // shared secret for coordinator authentication
+	Secret       string
 }
 
 func Run(cfg Config) error {
@@ -38,6 +41,12 @@ func Run(cfg Config) error {
 		return fmt.Errorf("load key share: %w", err)
 	}
 	log.Printf("[%s] Key share loaded (participants=%d)", cfg.NodeID, len(save.Ks))
+
+	partyIDs, err := loadPartyIDs(cfg.KeySharePath)
+	if err != nil {
+		return fmt.Errorf("load party IDs: %w", err)
+	}
+	log.Printf("[%s] Party order loaded: %v", cfg.NodeID, partyIDs)
 
 	addr := fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)
 	lis, err := net.Listen("tcp", addr)
@@ -48,9 +57,10 @@ func Run(cfg Config) error {
 	srv := grpc.NewServer()
 
 	node := &signerNode{
-		cfg:  cfg,
-		save: save,
-		jobs: make(map[string]*signingJob),
+		cfg:      cfg,
+		save:     save,
+		partyIDs: partyIDs,
+		jobs:     make(map[string]*signingJob),
 	}
 
 	tsav1.RegisterSignerServiceServer(srv, node)
@@ -62,7 +72,6 @@ func Run(cfg Config) error {
 		}
 	}()
 
-	// Dial coordinator AFTER server is up
 	coordConn, err := grpc.Dial(cfg.CoordAddr,
 		grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
@@ -74,7 +83,7 @@ func Run(cfg Config) error {
 		return fmt.Errorf("register with coordinator: %w", err)
 	}
 
-	select {} // block forever
+	select {}
 }
 
 func registerWithRetry(cfg Config, client tsav1.CoordinatorServiceClient) error {
@@ -82,7 +91,7 @@ func registerWithRetry(cfg Config, client tsav1.CoordinatorServiceClient) error 
 		NodeId: cfg.NodeID,
 		Host:   cfg.Host,
 		Port:   uint32(cfg.Port),
-		Token:  cfg.Secret, // present shared secret on registration
+		Token:  cfg.Secret,
 	}
 
 	var lastErr error
@@ -113,16 +122,18 @@ type signerNode struct {
 	tsav1.UnimplementedSignerServiceServer
 	cfg         Config
 	save        *keygen.LocalPartySaveData
+	partyIDs    []string
 	coordClient tsav1.CoordinatorServiceClient
 	mu          sync.Mutex
 	jobs        map[string]*signingJob
 }
 
 type signingJob struct {
-	party tss.Party
-	outCh chan tss.Message
-	endCh chan *common.SignatureData
-	errCh chan *tss.Error
+	party    tss.Party
+	outCh    chan tss.Message
+	endCh    chan *common.SignatureData
+	errCh    chan *tss.Error
+	updateCh chan tss.ParsedMessage
 }
 
 type ecdsaSignature struct {
@@ -135,30 +146,47 @@ func (n *signerNode) Health(_ context.Context, _ *tsav1.Empty) (*tsav1.HealthSta
 		Message: "signer ready",
 	}, nil
 }
+
 func (n *signerNode) Relay(ctx context.Context, pkt *tsav1.TssPacket) (*tsav1.Ack, error) {
 	log.Printf("[%s] Relay: job=%s from=%s to=%s payload_len=%d",
 		n.cfg.NodeID, pkt.JobId, pkt.FromNode, pkt.ToNode, len(pkt.Payload))
 
-	n.mu.Lock()
-	job, exists := n.jobs[pkt.JobId]
-	n.mu.Unlock()
+	// Coordinator start packet: create job immediately.
+	if pkt.FromNode == "coordinator" && len(pkt.Payload) == 32 {
+		n.mu.Lock()
+		_, exists := n.jobs[pkt.JobId]
+		n.mu.Unlock()
 
-	// Start job if coordinator triggers it
-	if !exists && pkt.FromNode == "coordinator" && len(pkt.Payload) == 32 {
-		var err error
-		job, err = n.startSigningJob(pkt.JobId, pkt.Payload)
-		if err != nil {
-			return &tsav1.Ack{Ok: false, Message: err.Error()}, nil
+		if !exists {
+			_, err := n.startSigningJob(pkt.JobId, pkt.Payload)
+			if err != nil {
+				return &tsav1.Ack{Ok: false, Message: err.Error()}, nil
+			}
 		}
 		return &tsav1.Ack{Ok: true, Message: "signing job started"}, nil
 	}
 
-	if !exists {
+	// For peer messages, the job may not exist yet because of startup race.
+	// Wait briefly for the coordinator packet to create the job.
+	var job *signingJob
+	found := false
+
+	for i := 0; i < 50; i++ { // wait up to ~500ms
+		n.mu.Lock()
+		job, found = n.jobs[pkt.JobId]
+		n.mu.Unlock()
+
+		if found {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	if !found {
 		return &tsav1.Ack{Ok: false, Message: "unknown job " + pkt.JobId}, nil
 	}
 
-	// Build correct PartyID for sender
-	pids := buildPartyIDs(n.save)
+	pids := buildPartyIDs(n.save, n.partyIDs)
 
 	var fromPID *tss.PartyID
 	for _, pid := range pids {
@@ -172,7 +200,6 @@ func (n *signerNode) Relay(ctx context.Context, pkt *tsav1.TssPacket) (*tsav1.Ac
 		return &tsav1.Ack{Ok: false, Message: "unknown sender " + pkt.FromNode}, nil
 	}
 
-	// Correct broadcast detection
 	isBroadcast := pkt.ToNode == ""
 
 	msg, err := tss.ParseWireMessage(pkt.Payload, fromPID, isBroadcast)
@@ -180,36 +207,31 @@ func (n *signerNode) Relay(ctx context.Context, pkt *tsav1.TssPacket) (*tsav1.Ac
 		return &tsav1.Ack{Ok: false, Message: "parse wire message: " + err.Error()}, nil
 	}
 
-	ok, tssErr := job.party.Update(msg)
-	if !ok || tssErr != nil {
-		errMsg := "unknown error"
-		if tssErr != nil {
-			errMsg = tssErr.Error()
-		}
-		return &tsav1.Ack{Ok: false, Message: "party update: " + errMsg}, nil
+	select {
+	case job.updateCh <- msg:
+		return &tsav1.Ack{Ok: true}, nil
+	default:
+		return &tsav1.Ack{Ok: false, Message: "update queue full"}, nil
 	}
-
-	return &tsav1.Ack{Ok: true}, nil
 }
 
 func (n *signerNode) startSigningJob(jobID string, msgHash []byte) (*signingJob, error) {
 	log.Printf("[%s] Starting GG20 signing round for job %s", n.cfg.NodeID, jobID)
 
-	pids := buildPartyIDs(n.save)
+	pids := buildPartyIDs(n.save, n.partyIDs)
 	idx := localPartyIndex(n.save)
 	if idx < 0 || idx >= len(pids) {
 		return nil, fmt.Errorf("local party index out of range")
 	}
 
 	thisPID := pids[idx]
-	threshold := n.cfg.Threshold
 
 	params := tss.NewParameters(
 		tss.S256(),
 		tss.NewPeerContext(pids),
 		thisPID,
 		len(pids),
-		threshold,
+		n.cfg.Threshold,
 	)
 
 	outCh := make(chan tss.Message, 64)
@@ -219,10 +241,11 @@ func (n *signerNode) startSigningJob(jobID string, msgHash []byte) (*signingJob,
 	party := signing.NewLocalParty(msgInt, params, *n.save, outCh, endCh)
 
 	job := &signingJob{
-		party: party,
-		outCh: outCh,
-		endCh: endCh,
-		errCh: make(chan *tss.Error, 4),
+		party:    party,
+		outCh:    outCh,
+		endCh:    endCh,
+		errCh:    make(chan *tss.Error, 4),
+		updateCh: make(chan tss.ParsedMessage, 64),
 	}
 
 	n.mu.Lock()
@@ -244,6 +267,12 @@ func (n *signerNode) runSigningParty(jobID string, job *signingJob) {
 		select {
 		case msg := <-job.outCh:
 			n.forwardMessage(jobID, job, msg)
+
+		case inMsg := <-job.updateCh:
+			ok, tssErr := job.party.Update(inMsg)
+			if !ok || tssErr != nil {
+				log.Printf("[%s] Job %s: party.Update error: %v", n.cfg.NodeID, jobID, tssErr)
+			}
 
 		case sig := <-job.endCh:
 			log.Printf("[%s] Job %s: signing complete! R=%x S=%x", n.cfg.NodeID, jobID, sig.R, sig.S)
@@ -339,32 +368,46 @@ func (n *signerNode) forwardMessage(jobID string, job *signingJob, msg tss.Messa
 	if !routing.IsBroadcast && len(routing.To) == 1 {
 		toNode = routing.To[0].Id
 	}
-	if toNode == n.cfg.NodeID {
-		pids := buildPartyIDs(n.save)
 
-		var fromPID *tss.PartyID
-		for _, pid := range pids {
-			if pid.Id == n.cfg.NodeID {
-				fromPID = pid
-				break
-			}
+	pids := buildPartyIDs(n.save, n.partyIDs)
+	var selfPID *tss.PartyID
+	for _, pid := range pids {
+		if pid.Id == n.cfg.NodeID {
+			selfPID = pid
+			break
 		}
-		if fromPID == nil {
+	}
+
+	if toNode == n.cfg.NodeID {
+		if selfPID == nil {
 			log.Printf("[%s] local relay failed: unknown self party id", n.cfg.NodeID)
 			return
 		}
-
-		msgParsed, err := tss.ParseWireMessage(wireBytes, fromPID, false)
+		msgParsed, err := tss.ParseWireMessage(wireBytes, selfPID, false)
 		if err != nil {
 			log.Printf("[%s] local relay parse failed: %v", n.cfg.NodeID, err)
 			return
 		}
-
-		ok, tssErr := job.party.Update(msgParsed)
-		if !ok || tssErr != nil {
-			log.Printf("[%s] local relay update failed: %v", n.cfg.NodeID, tssErr)
+		select {
+		case job.updateCh <- msgParsed:
+			log.Printf("[%s] self-message processed", n.cfg.NodeID)
+		default:
+			log.Printf("[%s] self-message dropped: update queue full", n.cfg.NodeID)
 		}
 		return
+	}
+
+	if routing.IsBroadcast && selfPID != nil {
+		selfMsg, err := tss.ParseWireMessage(wireBytes, selfPID, true)
+		if err != nil {
+			log.Printf("[%s] broadcast self-parse failed: %v", n.cfg.NodeID, err)
+		} else {
+			select {
+			case job.updateCh <- selfMsg:
+			default:
+				log.Printf("[%s] broadcast self-message dropped: update queue full", n.cfg.NodeID)
+			}
+		}
 	}
 
 	pkt := &tsav1.TssPacket{
@@ -383,23 +426,39 @@ func (n *signerNode) forwardMessage(jobID string, job *signingJob, msg tss.Messa
 	}
 }
 
-func buildPartyIDs(save *keygen.LocalPartySaveData) tss.SortedPartyIDs {
+func buildPartyIDs(save *keygen.LocalPartySaveData, partyIDs []string) tss.SortedPartyIDs {
 	pids := make(tss.UnSortedPartyIDs, len(save.Ks))
 	for i, k := range save.Ks {
-		id := fmt.Sprintf("signer-%d", i+1)
+		var id string
+		if i < len(partyIDs) {
+			id = partyIDs[i]
+		} else {
+			id = fmt.Sprintf("signer-%d", i+1)
+		}
 		pids[i] = tss.NewPartyID(id, id, k)
 	}
 	return tss.SortPartyIDs(pids)
 }
 
 func localPartyIndex(save *keygen.LocalPartySaveData) int {
-	if save == nil || save.LocalSecrets.ShareID == nil {
-		return 0
-	}
 	for i, k := range save.Ks {
-		if k != nil && k.Cmp(save.LocalSecrets.ShareID) == 0 {
+		if k != nil && save.LocalSecrets.ShareID != nil && k.Cmp(save.LocalSecrets.ShareID) == 0 {
 			return i
 		}
 	}
 	return 0
+}
+
+func loadPartyIDs(keySharePath string) ([]string, error) {
+	dir := filepath.Dir(keySharePath)
+	partiesPath := filepath.Join(dir, "parties.json")
+	data, err := os.ReadFile(partiesPath)
+	if err != nil {
+		return nil, fmt.Errorf("read parties.json: %w", err)
+	}
+	var ids []string
+	if err := json.Unmarshal(data, &ids); err != nil {
+		return nil, fmt.Errorf("parse parties.json: %w", err)
+	}
+	return ids, nil
 }

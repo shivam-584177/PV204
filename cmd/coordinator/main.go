@@ -13,9 +13,9 @@ import (
 )
 
 func main() {
-	port      := flag.Int("port", 50050, "coordinator gRPC port")
+	port := flag.Int("port", 50050, "coordinator gRPC port")
 	threshold := flag.Int("threshold", 1, "threshold parameter t for (t+1)-of-n signing")
-	secret    := flag.String("secret", "", "shared secret — signers must present this to register (leave empty to disable auth)")
+	secret := flag.String("secret", "", "shared secret — signers must present this to register (leave empty to disable auth)")
 	flag.Parse()
 
 	lis, err := net.Listen("tcp", fmt.Sprintf(":%d", *port))

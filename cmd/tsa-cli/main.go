@@ -54,10 +54,27 @@ func submit(args []string) {
 	}
 	jobID := fmt.Sprintf("%x", jobIDBytes)
 
-	// generate independent token nonce
+	// generate token nonce
 	tokenNonce := make([]byte, 16)
 	if _, err := rand.Read(tokenNonce); err != nil {
 		die("nonce: %v", err)
+	}
+
+	// build unsigned token FIRST
+	tok := token.Token{
+		DocHashB64:   base64.StdEncoding.EncodeToString(docHash),
+		TimestampUTC: time.Now().UTC().Format(time.RFC3339Nano),
+		NonceB64:     base64.StdEncoding.EncodeToString(tokenNonce),
+		PolicyOID:    *policy,
+		Algo:         "ECDSA-secp256k1-SHA256",
+		SigB64:       "",
+		PubKeyB64:    "",
+	}
+
+	// sign canonical token bytes (not just raw doc hash)
+	msgHash, err := token.SigningBytes(tok)
+	if err != nil {
+		die("build signing bytes: %v", err)
 	}
 
 	// connect to coordinator
@@ -75,7 +92,7 @@ func submit(args []string) {
 	// start signing job
 	_, err = client.StartSigning(ctx, &tsav1.SignJob{
 		JobId:   jobID,
-		MsgHash: docHash,
+		MsgHash: msgHash,
 	})
 	if err != nil {
 		die("StartSigning: %v", err)
@@ -101,16 +118,9 @@ func submit(args []string) {
 		time.Sleep(500 * time.Millisecond)
 	}
 
-	// build token
-	tok := token.Token{
-		DocHashB64:   base64.StdEncoding.EncodeToString(docHash),
-		TimestampUTC: time.Now().UTC().Format(time.RFC3339Nano),
-		NonceB64:     base64.StdEncoding.EncodeToString(tokenNonce),
-		PolicyOID:    *policy,
-		Algo:         "ECDSA-secp256k1-SHA256",
-		PubKeyB64:    base64.StdEncoding.EncodeToString(result.Pubkey),
-		SigB64:       base64.StdEncoding.EncodeToString(result.Signature),
-	}
+	// attach signature and pubkey after signing completes
+	tok.PubKeyB64 = base64.StdEncoding.EncodeToString(result.Pubkey)
+	tok.SigB64 = base64.StdEncoding.EncodeToString(result.Signature)
 
 	writeJSON(*out, tok)
 	fmt.Println("wrote", *out)

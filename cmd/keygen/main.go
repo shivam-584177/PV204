@@ -2,6 +2,7 @@ package main
 
 import (
 	"crypto/rand"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
@@ -136,6 +137,20 @@ func main() {
 			time.Sleep(10 * time.Millisecond)
 		}
 	}
+
+	sortedNodeIDs := make([]string, len(pids))
+	for i, pid := range pids {
+		sortedNodeIDs[i] = pid.Id
+	}
+	partiesJSON, err := json.Marshal(sortedNodeIDs)
+	if err != nil {
+		log.Fatalf("marshal parties.json: %v", err)
+	}
+	partiesPath := filepath.Join(*outDir, "parties.json")
+	if err := os.WriteFile(partiesPath, partiesJSON, 0644); err != nil {
+		log.Fatalf("write parties.json: %v", err)
+	}
+	log.Printf("wrote %s", partiesPath)
 
 	for i := 1; i <= *parties; i++ {
 		id := fmt.Sprintf("signer-%d", i)

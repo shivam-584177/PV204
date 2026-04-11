@@ -10,13 +10,13 @@ import (
 )
 
 func main() {
-	nodeID       := flag.String("id", "", "Unique node ID (e.g. signer-1)")
-	host         := flag.String("host", "localhost", "Host this signer listens on")
-	port         := flag.Int("port", 50051, "Port this signer listens on")
-	coordAddr    := flag.String("coord", "localhost:50050", "Coordinator gRPC address")
+	nodeID := flag.String("id", "", "Unique node ID (e.g. signer-1)")
+	host := flag.String("host", "localhost", "Host this signer listens on")
+	port := flag.Int("port", 50051, "Port this signer listens on")
+	coordAddr := flag.String("coord", "localhost:50050", "Coordinator gRPC address")
 	keySharePath := flag.String("keyshare", "", "Path to key share JSON file")
-	threshold    := flag.Int("threshold", 1, "threshold parameter t for (t+1)-of-n signing")
-	secret       := flag.String("secret", "", "shared secret for coordinator authentication")
+	threshold := flag.Int("threshold", 1, "threshold parameter t for (t+1)-of-n signing")
+	secret := flag.String("secret", "", "shared secret for coordinator authentication")
 	flag.Parse()
 
 	if *nodeID == "" {
