@@ -6,20 +6,48 @@
 
 set -euo pipefail
 
-TMPDIR=$(mktemp -d)
+COORD_PORT=18050
+SIGNER_BASE_PORT=18050
+SECRET="pv204-e2e-secret"
+COORD="localhost:${COORD_PORT}"
+
+TMPDIR="$(mktemp -d)"
 PIDS=()
 
 cleanup() {
     echo "[e2e] Cleaning up..."
-    for pid in "${PIDS[@]}"; do
-        kill "$pid" 2>/dev/null || true
+    set +e
+
+    for pid in "${PIDS[@]:-}"; do
+        if [[ -n "${pid:-}" ]] && kill -0 "$pid" 2>/dev/null; then
+            kill "$pid" 2>/dev/null || true
+        fi
     done
+
+    for pid in "${PIDS[@]:-}"; do
+        if [[ -n "${pid:-}" ]]; then
+            wait "$pid" 2>/dev/null || true
+        fi
+    done
+
     rm -rf "$TMPDIR"
 }
 trap cleanup EXIT
 
-SECRET="pv204-e2e-secret"
-COORD="localhost:50050"
+echo "[e2e] Cleaning previous processes..."
+
+if lsof -ti :"$COORD_PORT" >/dev/null 2>&1; then
+    lsof -ti :"$COORD_PORT" | xargs kill 2>/dev/null || true
+fi
+
+for i in 1 2 3; do
+    PORT=$((SIGNER_BASE_PORT + i))
+    if lsof -ti :"$PORT" >/dev/null 2>&1; then
+        lsof -ti :"$PORT" | xargs kill 2>/dev/null || true
+    fi
+done
+
+sleep 1
 
 echo "[e2e] Step 1: Generating keyshares..."
 go run ./cmd/keygen \
@@ -29,32 +57,45 @@ go run ./cmd/keygen \
 
 echo "[e2e] Step 2: Starting coordinator..."
 go run ./cmd/coordinator \
-    --port=50050 \
+    --port="$COORD_PORT" \
     --threshold=1 \
     --secret="$SECRET" &
-PIDS+=($!)
-sleep 1
+PIDS+=("$!")
+
+until lsof -i :"$COORD_PORT" >/dev/null 2>&1; do
+    sleep 0.2
+done
 
 echo "[e2e] Step 3: Starting 3 signer nodes..."
 for i in 1 2 3; do
+    PORT=$((SIGNER_BASE_PORT + i))
     go run ./cmd/signer \
         --id="signer-$i" \
-        --port="5005$i" \
+        --port="$PORT" \
         --coord="$COORD" \
         --keyshare="$TMPDIR/keyshares/signer${i}.json" \
         --threshold=1 \
         --secret="$SECRET" &
-    PIDS+=($!)
+    PIDS+=("$!")
+done
+
+echo "[e2e] Waiting for signer ports to be ready..."
+for i in 1 2 3; do
+    PORT=$((SIGNER_BASE_PORT + i))
+    until lsof -i :"$PORT" >/dev/null 2>&1; do
+        sleep 0.2
+    done
 done
 
 echo "[e2e] Waiting for signers to register..."
-sleep 3
+sleep 2
 
 echo "[e2e] Step 4: Submitting document..."
 go run ./cmd/tsa-cli submit \
     --file=testdata/sample.txt \
     --coord="$COORD" \
-    --out="$TMPDIR/token.json"
+    --out="$TMPDIR/token.json" \
+    --timeout=180
 
 echo "[e2e] Step 5: Verifying token..."
 go run ./cmd/tsa-cli verify \
@@ -65,7 +106,7 @@ echo "[e2e] Step 6: Verifying tampered document fails..."
 echo "tampered" > "$TMPDIR/tampered.txt"
 if go run ./cmd/tsa-cli verify \
     --file="$TMPDIR/tampered.txt" \
-    --token="$TMPDIR/token.json" 2>/dev/null; then
+    --token="$TMPDIR/token.json" >/dev/null 2>&1; then
     echo "[e2e] FAIL: tampered document should have failed verification"
     exit 1
 fi

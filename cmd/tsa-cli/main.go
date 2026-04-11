@@ -1,8 +1,7 @@
 package main
 
 import (
-	"crypto/ecdsa"
-	"crypto/elliptic"
+	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
@@ -11,7 +10,11 @@ import (
 	"os"
 	"time"
 
+	tsav1 "pv204/gen/go"
 	"pv204/internal/token"
+
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 )
 
 func main() {
@@ -35,44 +38,89 @@ func submit(args []string) {
 	file := fs.String("file", "", "document path")
 	out := fs.String("out", "token.json", "output token file")
 	policy := fs.String("policy", "1.2.3.4.5", "policy OID")
+	coord := fs.String("coord", "localhost:50050", "coordinator address")
+	timeout := fs.Int("timeout", 30, "seconds to wait for signing")
 	fs.Parse(args)
 
 	doc := mustRead(*file)
 
-	nonce := make([]byte, 16)
-	if _, err := rand.Read(nonce); err != nil {
+	// hash document
+	docHash := token.HashDoc(doc)
+
+	// generate random job ID
+	jobIDBytes := make([]byte, 16)
+	if _, err := rand.Read(jobIDBytes); err != nil {
+		die("job id: %v", err)
+	}
+	jobID := fmt.Sprintf("%x", jobIDBytes)
+
+	// generate token nonce
+	tokenNonce := make([]byte, 16)
+	if _, err := rand.Read(tokenNonce); err != nil {
 		die("nonce: %v", err)
 	}
 
-	// Phase II: local ECDSA key for pipeline testing (replace with GG20 in Phase III)
-	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	if err != nil {
-		die("keygen: %v", err)
-	}
-	pubB64, err := token.MarshalPubKeyB64(&priv.PublicKey)
-	if err != nil {
-		die("pub encode: %v", err)
-	}
-
+	// build unsigned token FIRST
 	tok := token.Token{
-		DocHashB64:   base64.StdEncoding.EncodeToString(token.HashDoc(doc)),
+		DocHashB64:   base64.StdEncoding.EncodeToString(docHash),
 		TimestampUTC: time.Now().UTC().Format(time.RFC3339Nano),
-		NonceB64:     base64.StdEncoding.EncodeToString(nonce),
+		NonceB64:     base64.StdEncoding.EncodeToString(tokenNonce),
 		PolicyOID:    *policy,
-		Algo:         "ECDSA-P256-SHA256",
-		PubKeyB64:    pubB64,
+		Algo:         "ECDSA-secp256k1-SHA256",
 		SigB64:       "",
+		PubKeyB64:    "",
 	}
 
-	msg, err := token.SigningBytes(tok)
+	// sign canonical token bytes (not just raw doc hash)
+	msgHash, err := token.SigningBytes(tok)
 	if err != nil {
-		die("signing bytes: %v", err)
+		die("build signing bytes: %v", err)
 	}
-	sigDER, err := token.SignECDSADER(priv, msg)
+
+	// connect to coordinator
+	conn, err := grpc.Dial(*coord, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
-		die("sign: %v", err)
+		die("dial coordinator: %v", err)
 	}
-	tok.SigB64 = base64.StdEncoding.EncodeToString(sigDER)
+	defer conn.Close()
+
+	client := tsav1.NewCoordinatorServiceClient(conn)
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(*timeout)*time.Second)
+	defer cancel()
+
+	// start signing job
+	_, err = client.StartSigning(ctx, &tsav1.SignJob{
+		JobId:   jobID,
+		MsgHash: msgHash,
+	})
+	if err != nil {
+		die("StartSigning: %v", err)
+	}
+
+	// poll for result
+	var result *tsav1.SignResult
+	for {
+		res, err := client.GetResult(ctx, &tsav1.SignJobId{JobId: jobID})
+		if err != nil {
+			die("GetResult: %v", err)
+		}
+
+		if res.Status == "done" {
+			result = res
+			break
+		}
+
+		if res.Status == "failed" {
+			die("signing failed")
+		}
+
+		time.Sleep(500 * time.Millisecond)
+	}
+
+	// attach signature and pubkey after signing completes
+	tok.PubKeyB64 = base64.StdEncoding.EncodeToString(result.Pubkey)
+	tok.SigB64 = base64.StdEncoding.EncodeToString(result.Signature)
 
 	writeJSON(*out, tok)
 	fmt.Println("wrote", *out)
@@ -91,10 +139,6 @@ func verify(args []string) {
 		die("VERIFY FAIL: %v", err)
 	}
 
-	pub, err := token.ParsePubKeyB64(tok.PubKeyB64)
-	if err != nil {
-		die("bad pubkey: %v", err)
-	}
 	sigDER, err := base64.StdEncoding.DecodeString(tok.SigB64)
 	if err != nil {
 		die("bad signature encoding: %v", err)
@@ -104,10 +148,32 @@ func verify(args []string) {
 	if err != nil {
 		die("signing bytes: %v", err)
 	}
-	ok, err := token.VerifyECDSADER(pub, msg, sigDER)
-	if err != nil || !ok {
-		die("VERIFY FAIL")
+
+	switch tok.Algo {
+	case "ECDSA-secp256k1-SHA256":
+		pub, err := token.ParseSecp256k1PubKeyB64(tok.PubKeyB64)
+		if err != nil {
+			die("bad pubkey: %v", err)
+		}
+		ok, err := token.VerifySecp256k1DER(pub, msg, sigDER)
+		if err != nil || !ok {
+			die("VERIFY FAIL")
+		}
+
+	case "ECDSA-P256-SHA256":
+		pub, err := token.ParsePubKeyB64(tok.PubKeyB64)
+		if err != nil {
+			die("bad pubkey: %v", err)
+		}
+		ok, err := token.VerifyECDSADER(pub, msg, sigDER)
+		if err != nil || !ok {
+			die("VERIFY FAIL")
+		}
+
+	default:
+		die("unsupported algorithm: %s", tok.Algo)
 	}
+
 	fmt.Println("OK")
 }
 

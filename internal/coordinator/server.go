@@ -41,44 +41,52 @@ func (s *Server) RegisterNode(_ context.Context, info *tsav1.NodeInfo) (*tsav1.A
 }
 
 func (s *Server) StartSigning(ctx context.Context, job *tsav1.SignJob) (*tsav1.Ack, error) {
-	// Reject duplicate job IDs — prevents replay attacks and silent session overwrites.
 	if _, exists := s.sessions.Get(job.JobId); exists {
 		return &tsav1.Ack{Ok: false, Message: "duplicate job_id"}, nil
 	}
 
 	s.sessions.Create(job.JobId, job.MsgHash)
+
 	pkt := &tsav1.TssPacket{
 		JobId:    job.JobId,
 		FromNode: "coordinator",
 		Payload:  job.MsgHash,
 	}
-	// Contact ALL registered signers. GG20 requires all n parties to participate
-	// in every round. The threshold t is enforced cryptographically: at least t+1
-	// parties must cooperate to produce a valid signature. Contacting only a subset
-	// would cause the others to wait for missing messages and deadlock.
+
 	for _, c := range s.registry.All() {
 		if _, err := c.Relay(ctx, pkt); err != nil {
 			log.Printf("relay to signer failed: %v", err)
 		}
 	}
+
 	log.Printf("started signing job %s (threshold=%d)", job.JobId, s.Threshold)
 	return &tsav1.Ack{Ok: true}, nil
 }
 
 func (s *Server) Relay(ctx context.Context, pkt *tsav1.TssPacket) (*tsav1.Ack, error) {
+	log.Printf("[Relay] job=%s from=%s to=%s payload_len=%d",
+		pkt.JobId, pkt.FromNode, pkt.ToNode, len(pkt.Payload))
+
 	if pkt.ToNode == "" {
-		for _, c := range s.registry.All() {
+		for _, c := range s.registry.AllExcept(pkt.FromNode) {
 			if _, err := c.Relay(ctx, pkt); err != nil {
 				log.Printf("broadcast relay failed: %v", err)
 			}
 		}
 		return &tsav1.Ack{Ok: true}, nil
 	}
+
 	c, ok := s.registry.Get(pkt.ToNode)
 	if !ok {
 		return &tsav1.Ack{Ok: false, Message: "unknown node: " + pkt.ToNode}, nil
 	}
-	return c.Relay(ctx, pkt)
+
+	if _, err := c.Relay(ctx, pkt); err != nil {
+		log.Printf("direct relay failed: %v", err)
+		return &tsav1.Ack{Ok: false, Message: err.Error()}, nil
+	}
+
+	return &tsav1.Ack{Ok: true}, nil
 }
 
 func (s *Server) GetResult(_ context.Context, req *tsav1.SignJobId) (*tsav1.SignResult, error) {

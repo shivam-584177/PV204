@@ -8,6 +8,9 @@ import (
 	"encoding/base64"
 	"errors"
 	"math/big"
+
+	btcec "github.com/btcsuite/btcd/btcec/v2"
+	btcec_ecdsa "github.com/btcsuite/btcd/btcec/v2/ecdsa"
 )
 
 type ecdsaSignature struct {
@@ -38,7 +41,7 @@ func ParsePubKeyB64(s string) (*ecdsa.PublicKey, error) {
 	return pub, nil
 }
 
-// Signs msg (already hashed) and returns ASN.1 DER signature.
+// Phase II / P-256 helper
 func SignECDSADER(priv *ecdsa.PrivateKey, msg []byte) ([]byte, error) {
 	r, s, err := ecdsa.Sign(rand.Reader, priv, msg)
 	if err != nil {
@@ -54,4 +57,24 @@ func VerifyECDSADER(pub *ecdsa.PublicKey, msg []byte, sigDER []byte) (bool, erro
 		return false, err
 	}
 	return ecdsa.Verify(pub, msg, sig.R, sig.S), nil
+}
+
+// Phase III / secp256k1 helpers
+
+// ParseSecp256k1PubKeyB64 parses a base64-encoded uncompressed secp256k1 public key
+// (65 bytes: 0x04 || X || Y).
+func ParseSecp256k1PubKeyB64(s string) (*btcec.PublicKey, error) {
+	b, err := base64.StdEncoding.DecodeString(s)
+	if err != nil {
+		return nil, err
+	}
+	return btcec.ParsePubKey(b)
+}
+
+func VerifySecp256k1DER(pub *btcec.PublicKey, msg []byte, sigDER []byte) (bool, error) {
+	sig, err := btcec_ecdsa.ParseDERSignature(sigDER)
+	if err != nil {
+		return false, err
+	}
+	return sig.Verify(msg, pub), nil
 }

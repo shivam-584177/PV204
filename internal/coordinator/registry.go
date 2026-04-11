@@ -2,6 +2,7 @@ package coordinator
 
 import (
 	"fmt"
+	"sort"
 	"sync"
 
 	tsav1 "pv204/gen/go"
@@ -59,26 +60,37 @@ func (r *Registry) All() []tsav1.SignerServiceClient {
 	return out
 }
 
+// AllExcept returns all signer clients except the one with the given nodeID.
+func (r *Registry) AllExcept(excludeID string) []tsav1.SignerServiceClient {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	out := make([]tsav1.SignerServiceClient, 0, len(r.nodes))
+	for id, c := range r.nodes {
+		if id != excludeID {
+			out = append(out, c.client)
+		}
+	}
+	return out
+}
+
+// Select returns k signer clients chosen deterministically by sorted node ID.
 func (r *Registry) Select(k int) []tsav1.SignerServiceClient {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	if k <= 0 || k >= len(r.nodes) {
-		out := make([]tsav1.SignerServiceClient, 0, len(r.nodes))
-		for _, c := range r.nodes {
-			out = append(out, c.client)
-		}
-		return out
+	ids := make([]string, 0, len(r.nodes))
+	for id := range r.nodes {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+
+	if k <= 0 || k >= len(ids) {
+		k = len(ids)
 	}
 
 	out := make([]tsav1.SignerServiceClient, 0, k)
-	count := 0
-	for _, c := range r.nodes {
-		out = append(out, c.client)
-		count++
-		if count == k {
-			break
-		}
+	for _, id := range ids[:k] {
+		out = append(out, r.nodes[id].client)
 	}
 	return out
 }
