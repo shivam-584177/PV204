@@ -29,3 +29,122 @@ The system consists of three components: signer nodes (each holding only a key s
 **Phase IV** - Peer project analysis and final presentation
 
 **Phase V** -  Discussion of discovered issues and proposed mitigations
+
+
+## System Architecture
+Components:
+
+- Coordinator: manages signing sessions and relays messages between signers
+- Signer Nodes: hold key shares and execute GG20 protocol
+- CLI (tsa-cli): used to submit documents and verify tokens
+
+## Prerequisites
+
+- Go ≥ 1.20
+- macOS / Linux / Windows (Git Bash or PowerShell)
+
+## How to Run the Project
+
+### 1. Clone the repository
+
+git clone <your-repo-url>  
+cd PV204  
+
+### 2. Generate key shares
+
+rm -rf /tmp/pv204-demo  
+mkdir -p /tmp/pv204-demo  
+
+go run ./cmd/keygen --parties=3 --threshold=1 --out-dir=/tmp/pv204-demo/keyshares  
+
+This generates:
+- signer1.json, signer2.json, signer3.json  
+- parties.json  
+
+### 3. Start the coordinator (Terminal 1)
+
+go run ./cmd/coordinator --port=50050 --threshold=1  
+
+### 4. Start signer nodes (3 separate terminals)
+
+Terminal 2:
+go run ./cmd/signer --id=signer-1 --host=localhost --port=50051 --coord=localhost:50050 --keyshare=/tmp/pv204-demo/keyshares/signer1.json --threshold=1  
+
+Terminal 3:
+go run ./cmd/signer --id=signer-2 --host=localhost --port=50052 --coord=localhost:50050 --keyshare=/tmp/pv204-demo/keyshares/signer2.json --threshold=1  
+
+Terminal 4:
+go run ./cmd/signer --id=signer-3 --host=localhost --port=50053 --coord=localhost:50050 --keyshare=/tmp/pv204-demo/keyshares/signer3.json --threshold=1  
+
+### 5. Submit a document
+
+go run ./cmd/tsa-cli submit --file=testdata/sample.txt --coord=localhost:50050 --out=token.json --timeout=180  
+
+Expected output:
+wrote token.json  
+
+### 6. Verify the token
+
+go run ./cmd/tsa-cli verify --file=testdata/sample.txt --token=token.json  
+
+Expected output:
+OK  
+
+### 7. Tamper detection test
+
+echo "tampered" > tampered.txt  
+
+go run ./cmd/tsa-cli verify --file=tampered.txt --token=token.json  
+
+Expected:
+VERIFY FAIL  
+
+## Automated End-to-End Test
+
+Run:
+
+bash scripts/e2e_test.sh  
+
+Expected output:
+
+[e2e] PASS — full pipeline working correctly  
+
+## Token Structure
+
+The generated token contains:
+- doc_hash_b64 (SHA-256 hash)
+- timestamp_utc
+- nonce_b64
+- sig_b64 (threshold signature)
+- pubkey_b64
+
+## Security Considerations
+
+Current protections:
+- threshold signing (no full key exposure)
+- document integrity via hashing
+- tamper detection
+
+Potential risks:
+- malicious coordinator
+- denial-of-service via offline nodes
+- replay attacks (partially mitigated)
+
+## Contributions
+
+Shivam Bhardwaj:
+- GG20 integration
+- signer implementation
+- concurrency fixes
+
+Abhinav Nehra:
+- CLI (submit + verify)
+- E2E pipeline
+- demo coordination
+
+Eni:
+- coordinator logic
+- relay and session handling
+- system integration
+
+
